@@ -1,55 +1,60 @@
-import { useEffect, useState } from "react";
-import type { Schema } from "../amplify/data/resource";
-import { generateClient } from "aws-amplify/data";
-import { Authenticator } from '@aws-amplify/ui-react'
-import '@aws-amplify/ui-react/styles.css'
+import React, { useState, useEffect } from 'react';
+import { Authenticator } from '@aws-amplify/ui-react';
+import '@aws-amplify/ui-react/styles.css';
+import { generateClient } from 'aws-amplify/api';
+import { type Schema } from '@/amplify/data/resource';
+import TopBar from './components/TopBar';
+import SideBar from './components/SideBar';
+import Dashboard from './components/Dashboard';
+import Recordings from './components/Recordings';
+import Settings from './components/Settings';
+import UserManagement from './components/UserManagement';
 
 const client = generateClient<Schema>();
 
 function App() {
-  const [todos, setTodos] = useState<Array<Schema["Todo"]["type"]>>([]);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState('dashboard');
 
   useEffect(() => {
-    client.models.Todo.observeQuery().subscribe({
-      next: (data) => setTodos([...data.items]),
-    });
+    // Fetch user role from your backend or Cognito
+    // This is a placeholder and should be replaced with actual role fetching logic
+    const fetchUserRole = async () => {
+      // Placeholder: replace with actual API call
+      setUserRole('ADMINISTRATOR');
+    };
+    fetchUserRole();
   }, []);
 
-  function createTodo() {
-    client.models.Todo.create({ content: window.prompt("Todo content") });
-  }
-    
-  function deleteTodo(id: string) {
-    client.models.Todo.delete({ id })
-  }
+  const renderView = () => {
+    switch(currentView) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'recordings':
+        return <Recordings />;
+      case 'settings':
+        return <Settings />;
+      case 'user-management':
+        return userRole === 'ADMINISTRATOR' ? <UserManagement /> : null;
+      default:
+        return <Dashboard />;
+    }
+  };
+
   return (
-        
     <Authenticator>
-            {({ signOut, user }) => (
-    <main>
-                <h1>{user?.signInDetails?.loginId}'s todos</h1>
-      <button onClick={createTodo}>+ new</button>
-      <ul>
-        {todos.map((todo) => (
-          
-          <li
-            onClick={() => deleteTodo(todo.id)}
-            key={todo.id}>{todo.content}</li>
-        ))}
-      </ul>
-      <div>
-        🥳 App successfully hosted. Try creating a new todo.
-        <br />
-        <a href="https://docs.amplify.aws/react/start/quickstart/#make-frontend-updates">
-          Review next step of this tutorial.
-        </a>
+      {({ signOut, user }) => (
+        <div className="app-container">
+          <TopBar signOut={signOut} user={user} />
+          <div className="main-content">
+            <SideBar userRole={userRole} setCurrentView={setCurrentView} />
+            <div className="view-container">
+              {renderView()}
+            </div>
           </div>
-           <button onClick={signOut}>Sign out</button>
-        </main>
-            
+        </div>
       )}
     </Authenticator>
-                 
   );
 }
 

@@ -1,0 +1,77 @@
+import boto3
+import re
+import logging
+from datetime import datetime
+from urllib.parse import unquote_plus
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+
+def handler(event, context):
+    logger.info(f"Lambda function invoked with event: {event}")
+
+    try:
+        source_bucket = event['Records'][0]['s3']['bucket']['name']
+        source_key = unquote_plus(event['Records'][0]['s3']['object']['key'])
+        logger.info(f"Processing file: {source_key} in bucket: {source_bucket}")
+
+        match = re.match(r'(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) \d+ (\d+)\.mp3', source_key)
+        if not match:
+            logger.warning(f"Filename {source_key} does not match expected format. Skipping.")
+            return
+
+        date_str, time_str, phone_number = match.groups()
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        logger.info(f"Parsed date: {date_str}, time: {time_str}, phone number: {phone_number}")
+
+        new_key = f"{date_obj.year:04d}/{date_obj.month:02d}/{date_obj.day:02d}/{phone_number}/{source_key}"
+        logger.info(f"New key constructed: {new_key}")
+
+        copy_response = s3_client.copy_object(
+            Bucket=source_bucket,
+            CopySource={'Bucket': source_bucket, 'Key': source_key},
+            Key=new_key
+        )
+        logger.info(f"Copy operation response: {copy_response}")
+
+        if copy_response['ResponseMetadata']['HTTPStatusCode'] == 200:
+            logger.info("File copied successfully. Proceeding to delete original file.")
+            
+            delete_response = s3_client.delete_object(
+                Bucket=source_bucket,
+                Key=source_key
+            )
+            logger.info(f"Delete operation response: {delete_response}")
+
+            if delete_response['ResponseMetadata']['HTTPStatusCode'] == 204:
+                logger.info(f"File successfully moved from {source_key} to {new_key}")
+                
+                table = dynamodb.Table('call_recordings')
+                try:
+                    response = table.put_item(
+                        Item={
+                            'phone_number': phone_number,
+                            'date': date_str,
+                            'call_time': time_str,
+                            's3_key': new_key
+                        }
+                    )
+                    logger.info(f"DynamoDB insertion response: {response}")
+                except Exception as e:
+                    logger.error(f"Error inserting into DynamoDB: {str(e)}", exc_info=True)
+            else:
+                logger.error(f"Failed to delete original file. HTTPStatusCode: {delete_response['ResponseMetadata']['HTTPStatusCode']}")
+        else:
+            logger.error(f"Failed to copy file. HTTPStatusCode: {copy_response['ResponseMetadata']['HTTPStatusCode']}")
+
+    except Exception as e:
+        logger.error(f"An error occurred: {str(e)}", exc_info=True)
+        raise
+
+    return {
+        'statusCode': 200,
+        'body': f"Processing completed for file: {source_key}"
+    }
